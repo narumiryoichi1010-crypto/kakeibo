@@ -165,6 +165,34 @@
   .tag.new{border-color:var(--s3);color:var(--s3)}
   .tag.mv{border-color:var(--s1);color:var(--s1)}
 
+  /* 半月クレジット清算 */
+  .stl{border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:8px;background:var(--surface)}
+  .stl.done{border-color:var(--s3)}
+  .stl>summary{list-style:none;cursor:pointer;padding:11px 13px;display:flex;align-items:center;gap:9px}
+  .stl>summary::-webkit-details-marker{display:none}
+  .stl>summary .car{color:var(--ink-3);transition:transform .15s;font-size:11px;flex:none}
+  .stl[open]>summary .car{transform:rotate(90deg)}
+  .stl[open]>summary{border-bottom:1px solid var(--grid)}
+  .stl .ttl{flex:1;min-width:0;font-size:13.5px;font-weight:640;line-height:1.35}
+  .stl .ttl small{display:block;font-weight:450;color:var(--ink-3);font-size:11px}
+  .stl>summary .amt{font-variant-numeric:tabular-nums;font-weight:670;font-size:16px;flex:none}
+  .stl .cd{display:flex;align-items:center;gap:9px;padding:8px 13px;border-bottom:1px solid var(--grid);font-size:13px}
+  .stl .cd .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .stl .cd .nm small{display:block;color:var(--ink-3);font-size:10.5px;white-space:normal}
+  .stl .cd .v{font-variant-numeric:tabular-nums;font-weight:620;flex:none}
+  .stl .ft{display:flex;align-items:center;gap:10px;padding:10px 13px;font-size:12.5px;
+    background:var(--plane);font-weight:550;cursor:pointer}
+  .brk{display:flex;flex-wrap:wrap;gap:1px 12px;font-size:11.5px;color:var(--ink-3);
+    line-height:1.5;margin-top:4px}
+  .brk>span{white-space:nowrap}
+  .pghd .meta .brk b, .brk b{display:inline;font-size:11.5px;color:var(--ink-2);
+    font-variant-numeric:tabular-nums;font-weight:660}
+  .brk.msg{display:block}
+  .prow.tx{background:color-mix(in srgb,var(--s3) 4%,transparent)}
+  .prow.tx .t{font-size:13px;padding-left:2px}
+  .paygrp.nod{border-style:dashed}
+  .pghd .d.small{font-size:12px;line-height:1.25;font-weight:660}
+
   .field{margin-bottom:11px}
   label{display:block;font-size:11.5px;color:var(--ink-2);margin-bottom:5px;font-weight:600}
   input,select{width:100%;padding:11px 12px;border:1px solid var(--border);border-radius:10px;background:var(--plane)}
@@ -287,6 +315,11 @@
     <div class="legend" style="margin-bottom:10px"><span id="payMsg"></span></div>
     <div id="nextDue"></div>
     <button class="btn primary" id="goPay" style="margin-top:10px">支払いをチェックする</button>
+  </div>
+  <div class="card">
+    <h2>クレジット清算（半月ごと） <span class="sub" id="stlSub"></span></h2>
+    <div id="stlList"></div>
+    <div class="note" id="stlNote"></div>
   </div>
   <div class="tiles">
     <div class="tile"><div class="lab">収入</div><div class="val" id="tInc">–</div><div class="sub" id="tIncSub"></div></div>
@@ -418,6 +451,7 @@
       <button class="btn" id="expCsv">やりくりCSV（今月）</button>
       <button class="btn" id="expCsvAll">やりくりCSV（全期間）</button>
       <button class="btn" id="expPay">支払いCSV（今月）</button>
+      <button class="btn" id="expStl">クレジット清算CSV</button>
     </div>
     <div class="note">CSVはUTF-8 BOM付き。Excelにそのまま貼れます。</div>
   </div>
@@ -434,6 +468,23 @@
     <div class="row" style="margin-top:10px">
       <input type="text" id="newPay" placeholder="新しい支払方法" style="flex:1;min-width:140px">
       <button class="btn" id="addPay">追加</button></div>
+  </div>
+  <div class="card">
+    <h2>クレジット清算の設定</h2>
+    <label>清算の対象にする支払方法（＝カード）</label>
+    <div id="cardEdit" class="row"></div>
+    <div class="field" style="margin-top:14px"><label for="fxHalf">固定費のカード払いを、どちらの半月に入れるか</label>
+      <select id="fxHalf">
+        <option value="first">前半（1〜15日）にまとめる</option>
+        <option value="split">前半・後半に半分ずつ</option>
+        <option value="none">含めない（やりくり明細だけで集計）</option>
+      </select></div>
+    <div class="field"><label for="lSort">台帳の並び順</label>
+      <select id="lSort">
+        <option value="name">名称 → 引落日 → 金額 → 引落先</option>
+        <option value="day">引落日 → 引落先 → 金額 → 名称</option>
+      </select></div>
+    <div class="note">「毎月払いでない」（年払い等）の項目は清算集計に含めません。積立タブで別に管理しているためです。</div>
   </div>
   <div class="card">
     <h2>この月の記録を消す</h2>
@@ -500,8 +551,18 @@ const SEED_SET={
         "ETC・駐車場","電車代","日用品・カインズ","ショッピング・量販店","医療・健康・美容","脱毛",
         "床屋","コンタクト","サプリ","葉巻","デジタル都度課金","レジャー・娯楽","ギフト・プレゼント","その他"],
   pays:["メイン(ザ・クラス)","サブ(ANA JCB)","au PAYカード","トヨタTS CUBIC","楽天カード","ゆうちょ口座","現金","電子マネー"],
-  pool:{}
+  pool:{}, settle:{}, opt:{cards:null,fxhalf:"first",lsort:"name"}
 };
+/* 清算まわりの設定は1つのオブジェクトにまとめて settings の1行に入れる
+   （cats/pays/pool と同じく値は必ずJSONのオブジェクト・配列にする） */
+function normOpt(o){
+  o=(o&&typeof o==="object"&&!Array.isArray(o))?o:{};
+  return {cards:Array.isArray(o.cards)?o.cards:null,          // null＝自動判定
+          fxhalf:["first","split","none"].includes(o.fxhalf)?o.fxhalf:"first",
+          lsort:["name","day"].includes(o.lsort)?o.lsort:"name"};
+}
+const OPT=()=>normOpt(S.settings.opt);
+const setOpt=(k,v)=>{const o=OPT();o[k]=v;setSetting("opt",o);};
 const GNAMES={"①":"住宅・ローン","②":"保険","③":"通信","④":"光熱費","⑤":"習い事・ジム",
   "⑥":"定期サブスク","⑦":"年会費（年1回→月割）","⑧":"定期化した生活費（月平均）","⑨":"税金"};
 
@@ -516,6 +577,8 @@ if(!Array.isArray(S.expenses)) S.expenses=[];
 if(!S.settings) S.settings=JSON.parse(JSON.stringify(SEED_SET));
 ["cats","pays"].forEach(k=>{if(!Array.isArray(S.settings[k]))S.settings[k]=SEED_SET[k];});
 if(!S.settings.pool||typeof S.settings.pool!=="object")S.settings.pool={};
+if(!S.settings.settle||typeof S.settings.settle!=="object")S.settings.settle={};
+S.settings.opt=normOpt(S.settings.opt);
 let OUT=lsGet(LS.outbox,[]);
 let UI=lsGet(LS.ui,{theme:"light"});
 const cache=()=>lsSet(LS.cache,S);
@@ -605,7 +668,9 @@ async function pull(){
     M.data.forEach(r=>{(S.monthly[r.ym]=S.monthly[r.ym]||{})[r.ledger_id]={paid:!!r.paid,amount:r.amount};});
     S.expenses=E.data.map(r=>({id:r.id,date:r.spent_on,cat:r.category,amount:r.amount,pay:r.method,memo:r.memo||""}));
     const st={}; T.data.forEach(r=>st[r.key]=r.value);
-    S.settings={cats:st.cats||SEED_SET.cats,pays:st.pays||SEED_SET.pays,pool:st.pool||{}};
+    S.settings={cats:st.cats||SEED_SET.cats,pays:st.pays||SEED_SET.pays,pool:st.pool||{},
+      settle:(st.settle&&typeof st.settle==="object")?st.settle:{},
+      opt:normOpt(st.opt)};
     mode="online"; cache(); refreshSync(); fillSelects(); render();
   }catch(e){ mode="offline"; refreshSync(); }
   pulling=false;
@@ -724,6 +789,49 @@ const income=()=>INC().filter(i=>i.on!==false).reduce((a,i)=>a+(+i.a||0),0);
 const mTx=m=>S.expenses.filter(t=>ymOf(t.date)===m);
 const used=m=>mTx(m).reduce((a,t)=>a+(+t.amount||0),0);
 const dayNum=k=>{const n=parseInt(k);return isNaN(n)?999:n;};
+const g8Rows=()=>onRows().filter(r=>r.g==="⑧");
+
+/* ---------- 半月ブロックとクレジット清算 ----------
+   ブロック = 1〜15日（H1）／16〜末日（H2）
+   清算日   = H1 → 同月16日 ／ H2 → 翌月1日
+   JCB(16日〜翌月15日締め)も 楽天(月初〜月末締め) も半月2ブロックで1請求になる。 */
+const NONCARD=/現金|ゆうちょ|口座|銀行|振替|電子マネー|デビット|不明|なし/;
+const isCardName=v=>!!v&&!NONCARD.test(v);
+const payUniverse=()=>[...new Set(S.settings.pays.concat(FX().map(r=>r.src)).filter(Boolean))];
+const cardList=()=>{const c=OPT().cards;return Array.isArray(c)?c:payUniverse().filter(isCardName);};
+const lastDay=(y,m)=>new Date(y,m,0).getDate();
+const pad2=n=>String(n).padStart(2,"0");
+const nextYM=m=>{const[y,mm]=m.split("-").map(Number);const d=new Date(y,mm,1);
+  return d.getFullYear()+"-"+pad2(d.getMonth()+1);};
+const blockOf=d=>ymOf(d)+"-"+(+String(d).slice(8,10)<=15?"H1":"H2");
+function blockRange(k){const ym=k.slice(0,7),y=+k.slice(0,4),m=+k.slice(5,7);
+  return k.slice(8)==="H1"?[ym+"-01",ym+"-15"]:[ym+"-16",ym+"-"+pad2(lastDay(y,m))];}
+function blockLabel(k){const[f,t]=blockRange(k);
+  return `${+k.slice(5,7)}月 ${k.slice(8)==="H1"?"前半":"後半"}（${+f.slice(8)}〜${+t.slice(8)}日）`;}
+const settleDate=k=>k.slice(8)==="H1"?k.slice(0,7)+"-16":nextYM(k.slice(0,7))+"-01";
+/* curYM に関係する3ブロック：先月後半(1日に清算)／今月前半(16日に清算)／今月後半(翌1日に清算・進行中) */
+const blocksFor=m=>[prevYM(m)+"-H2", m+"-H1", m+"-H2"];
+/* 固定費のうちカード払いのもの。年払い等(nm)は積立管理なので除外。⑧も除外(payRows) */
+const fxCardRows=()=>{const cs=cardList();return payRows().filter(r=>!r.nm&&cs.includes(r.src));};
+function blockTotals(k){
+  const[f,t]=blockRange(k), cs=cardList(), by={};
+  cs.forEach(c=>by[c]={tx:0,fx:0,n:0});
+  S.expenses.forEach(e=>{const d=String(e.date);
+    if(d>=f&&d<=t&&by[e.pay]){by[e.pay].tx+=(+e.amount||0);by[e.pay].n++;}});
+  const mode=OPT().fxhalf;
+  const w=mode==="none"?0:(mode==="split"?0.5:(k.slice(8)==="H1"?1:0));
+  if(w) fxCardRows().forEach(r=>{if(by[r.src])by[r.src].fx+=amtIn(r,k.slice(0,7))*w;});
+  const rows=cs.map(c=>({card:c,tx:by[c].tx,fx:by[c].fx,n:by[c].n,sum:by[c].tx+by[c].fx}))
+    .filter(r=>r.sum>0).sort((a,b)=>b.sum-a.sum);
+  return {rows,total:rows.reduce((a,r)=>a+r.sum,0)};
+}
+/* ---------- 台帳の並び順 ---------- */
+const jcmp=(a,b)=>String(a||"").localeCompare(String(b||""),"ja");
+function ledgerCmp(a,b){
+  return OPT().lsort==="day"
+    ? (dayNum(a.day)-dayNum(b.day)||jcmp(a.src,b.src)||(+b.a||0)-(+a.a||0)||jcmp(a.n,b.n))
+    : (jcmp(a.n,b.n)||dayNum(a.day)-dayNum(b.day)||(+b.a||0)-(+a.a||0)||jcmp(a.src,b.src));
+}
 
 /* ---------- mutations ---------- */
 const toRow=r=>({id:r.id,kind:r.kind,grp:r.g,name:r.n,amount:+r.a||0,src:r.src,day:r.day,
@@ -801,34 +909,80 @@ function addLedger(kind,g){
 }
 
 /* ---------- PAY ---------- */
+/* 引落日ごとのグループ。固定費(引落日)と やりくり明細(利用日) を同じ日でまとめる */
+const PLAINDAY=/^\s*(\d{1,2})\s*日?\s*$/;   // 「10日」「19」だけを日付グループに合流させる
 function payGroups(){
-  const gs={}; payRows().forEach(r=>{(gs[r.day||"不明"]=gs[r.day||"不明"]||[]).push(r);});
-  return Object.keys(gs).sort((a,b)=>dayNum(a)-dayNum(b)||a.localeCompare(b)).map(k=>({day:k,rows:gs[k]}));
+  const gs={};
+  const put=(key,d,lab)=>(gs[key]=gs[key]||{key,d,lab,fx:[],tx:[]});
+  payRows().forEach(r=>{
+    const s=String(r.day||"").trim(), m=s.match(PLAINDAY);
+    // 「9日,13日」「不定期」など素直に1日付でないものは、書いたとおりのラベルで独立させる
+    if(m) put("d"+ +m[1], +m[1], +m[1]+"日").fx.push(r);
+    else  put("x"+s, dayNum(s), s||"不明").fx.push(r);});
+  mTx(curYM).forEach(t=>{const n=+String(t.date).slice(8,10);
+    put("d"+n, n, n+"日").tx.push(t);});
+  return Object.values(gs).sort((a,b)=>a.d-b.d||jcmp(a.lab,b.lab));
+}
+/* 引落元／支払方法ごとの内訳を「名前 ¥金額」で並べる */
+function srcBreak(pairs){
+  const by={}; pairs.forEach(([s,v])=>by[s||"不明"]=(by[s||"不明"]||0)+v);
+  return Object.entries(by).sort((a,b)=>b[1]-a[1])
+    .map(([s,v])=>`<span>${esc(s)} <b>${yen(v)}</b></span>`).join("");
+}
+function payRowHTML(r){
+  const p=isPaid(r,curYM), v=billVal(r,curYM);
+  return `<div class="prow ${p?"paid":""}">
+    <label class="chk"><input type="checkbox" ${p?"checked":""} data-paid="${r.id}"><span></span></label>
+    <div class="t">${esc(r.n)}${r.nm?' <span class="tag pool">年払い等</span>':""}
+      <small>${esc(r.g)} ${esc(GNAMES[r.g]||"")} ・ ${esc(r.src)}</small></div>
+    ${r.mv?`<input type="number" inputmode="numeric" class="${v===null?"est":""}" data-bill="${r.id}"
+           value="${v===null?"":v}" placeholder="${est(r)}" style="border-color:var(--s1)">`
+          :`<div class="amt">${yen(est(r))}</div>`}
+  </div>`;
 }
 function renderPay(){
   const rows=payRows(), pc=paidCount(curYM), pt=paidTotal(curYM), plan=planTotal(curYM);
   $("#payHint").textContent=`${pc} / ${rows.length}件 ・ ${yen(pt)} / ${yen(plan)}`;
   $("#payPg2").style.width=(plan?pt/plan*100:0)+"%";
   const today=new Date().getDate(), isCur=curYM===new Date().toISOString().slice(0,7);
-  $("#payList").innerHTML=payGroups().map(({day,rows})=>{
-    const sum=rows.reduce((a,r)=>a+amtIn(r,curYM),0);
-    const done=rows.filter(r=>isPaid(r,curYM)).length, all=done===rows.length;
-    const d=dayNum(day), soon=isCur&&d<999&&d>=today&&d<=today+7;
+
+  let html=payGroups().map(g=>{
+    const fxSum=g.fx.reduce((a,r)=>a+amtIn(r,curYM),0);
+    const txSum=g.tx.reduce((a,t)=>a+(+t.amount||0),0);
+    const done=g.fx.filter(r=>isPaid(r,curYM)).length, all=g.fx.length>0&&done===g.fx.length;
+    const soon=isCur&&g.fx.length>0&&g.d<999&&g.d>=today&&g.d<=today+7;
+    const brk=srcBreak(g.fx.map(r=>[r.src,amtIn(r,curYM)])
+                 .concat(g.tx.map(t=>[t.pay,+t.amount||0])));
+    const meta=[g.fx.length?`引落 ${yen(fxSum)}・${done}/${g.fx.length}件`:"",
+                g.tx.length?`やりくり ${yen(txSum)}・${g.tx.length}件`:""].filter(Boolean).join(" ／ ");
     return `<div class="paygrp ${all?"done":""}">
-      <div class="pghd"><div class="d">${esc(day)}</div>
-        <div class="meta"><b>${yen(sum)}</b>${done}/${rows.length}件 ・ ${esc([...new Set(rows.map(r=>r.src))].join("・"))}${soon?" ・ まもなく":""}</div>
-        <button class="allbtn ${all?"on":""}" data-all="${esc(day)}">${all?"✓ 済":"まとめて✓"}</button></div>
-      ${rows.slice().sort((a,b)=>amtIn(b,curYM)-amtIn(a,curYM)).map(r=>{
-        const p=isPaid(r,curYM), v=billVal(r,curYM);
-        return `<div class="prow ${p?"paid":""}">
-          <label class="chk"><input type="checkbox" ${p?"checked":""} data-paid="${r.id}"><span></span></label>
-          <div class="t">${esc(r.n)}${r.nm?' <span class="tag pool">年払い等</span>':""}
-            <small>${esc(r.g)} ${esc(GNAMES[r.g]||"")} ・ ${esc(r.src)}</small></div>
-          ${r.mv?`<input type="number" inputmode="numeric" class="${v===null?"est":""}" data-bill="${r.id}"
-                 value="${v===null?"":v}" placeholder="${est(r)}" style="border-color:var(--s1)">`
-                :`<div class="amt">${yen(est(r))}</div>`}
-        </div>`;}).join("")}
-    </div>`;}).join("")||`<div class="card"><div class="empty">支払い項目がありません。</div></div>`;
+      <div class="pghd"><div class="d">${esc(g.lab)}</div>
+        <div class="meta"><b>${yen(fxSum+txSum)}</b>${meta}${soon?" ・ まもなく":""}
+          <div class="brk">${brk}</div></div>
+        ${g.fx.length?`<button class="allbtn ${all?"on":""}" data-all="${esc(g.key)}">${all?"✓ 済":"まとめて✓"}</button>`:""}</div>
+      ${g.fx.slice().sort((a,b)=>amtIn(b,curYM)-amtIn(a,curYM)).map(payRowHTML).join("")}
+      ${g.tx.slice().sort((a,b)=>(+b.amount||0)-(+a.amount||0)).map(t=>
+        `<div class="prow tx"><div class="t"><b>${esc(t.cat)}</b>${t.memo?" "+esc(t.memo):""}
+          <small>やりくり ・ ${esc(t.pay)}</small></div>
+          <div class="amt">${yen(t.amount)}</div></div>`).join("")}
+    </div>`;}).join("");
+
+  /* ⑧ 定期化した生活費 ＝ 日付なしでまとめて末尾に */
+  const g8r=g8Rows();
+  if(g8r.length){
+    const s8=g8r.reduce((a,r)=>a+amtIn(r,curYM),0);
+    const d8=g8r.filter(r=>isPaid(r,curYM)).length, a8=d8===g8r.length;
+    html+=`<div class="paygrp nod ${a8?"done":""}">
+      <div class="pghd"><div class="d small">日付<br>なし</div>
+        <div class="meta"><b>${yen(s8)}</b>⑧ 定期化した生活費 ・ ${d8}/${g8r.length}件
+          <div class="brk">${srcBreak(g8r.map(r=>[r.src,amtIn(r,curYM)]))}</div>
+          <div class="brk msg" style="color:var(--s2)">やりくり枠の内数です。上の「支払い予定」には足していません。</div></div>
+        <button class="allbtn ${a8?"on":""}" data-all="g8">${a8?"✓ 済":"まとめて✓"}</button></div>
+      ${g8r.slice().sort((a,b)=>amtIn(b,curYM)-amtIn(a,curYM)).map(payRowHTML).join("")}
+    </div>`;
+  }
+  $("#payList").innerHTML=html||`<div class="card"><div class="empty">支払い項目がありません。</div></div>`;
+
   $$("[data-paid]").forEach(el=>el.onchange=()=>{
     const r=S.ledger.find(x=>x.id===el.dataset.paid); setMonthly(r,curYM,{paid:el.checked});});
   $$("[data-bill]").forEach(el=>{el.onchange=()=>{
@@ -836,15 +990,17 @@ function renderPay(){
     setMonthly(r,curYM,{amount:el.value===""?null:+el.value});};
     el.addEventListener("keydown",e=>{if(e.key==="Enter")el.blur();});});
   $$("[data-all]").forEach(b=>b.onclick=()=>{
-    const grp=payGroups().find(g=>g.day===b.dataset.all); if(!grp)return;
-    const all=grp.rows.every(r=>isPaid(r,curYM));
-    grp.rows.forEach(r=>{const cur=Object.assign({paid:false,amount:null},mrec(r,curYM)||{},{paid:!all});
+    const k=b.dataset.all;
+    const rs=k==="g8"?g8Rows():((payGroups().find(g=>g.key===k)||{fx:[]}).fx);
+    if(!rs.length)return;
+    const all=rs.every(r=>isPaid(r,curYM));
+    rs.forEach(r=>{const cur=Object.assign({paid:false,amount:null},mrec(r,curYM)||{},{paid:!all});
       (S.monthly[curYM]=S.monthly[curYM]||{})[r.id]=cur;
       OUT.push({id:uuid(),t:"monthly.up",row:{ym:curYM,ledger_id:r.id,paid:cur.paid,amount:cur.amount}});});
     cache();outSave();refreshSync();flush();render();});
 }
 $("#payAllClear").onclick=()=>{if(!confirm("この月のチェックを全部外します。"))return;
-  payRows().forEach(r=>{const cur=Object.assign({paid:false,amount:null},mrec(r,curYM)||{},{paid:false});
+  payRows().concat(g8Rows()).forEach(r=>{const cur=Object.assign({paid:false,amount:null},mrec(r,curYM)||{},{paid:false});
     (S.monthly[curYM]=S.monthly[curYM]||{})[r.id]=cur;
     OUT.push({id:uuid(),t:"monthly.up",row:{ym:curYM,ledger_id:r.id,paid:false,amount:cur.amount}});});
   cache();outSave();refreshSync();flush();render();};
@@ -869,10 +1025,10 @@ function renderHome(){
     ? `未払い <b>${yen(un)}</b>　<span style="color:var(--ink-3)">支払済み ${yen(pt)} / ${yen(plan)}</span>`
     : `<b class="pos">今月の支払いは全部チェック済み</b>　<span style="color:var(--ink-3)">${yen(pt)}</span>`;
   const today=new Date().getDate(), isCur=curYM===new Date().toISOString().slice(0,7);
-  const nx=payGroups().map(g=>({...g,un:g.rows.filter(r=>!isPaid(r,curYM))})).filter(g=>g.un.length);
+  const nx=payGroups().map(g=>({...g,un:g.fx.filter(r=>!isPaid(r,curYM))})).filter(g=>g.un.length);
   $("#nextDue").innerHTML=nx.length?nx.slice(0,3).map(g=>{
-    const d=dayNum(g.day), soon=isCur&&d<999&&d>=today&&d<=today+7;
-    return `<div class="item" style="padding:7px 0"><div class="nm">${esc(g.day)} ${soon?'<span class="tag pool">まもなく</span>':""}
+    const soon=isCur&&g.d<999&&g.d>=today&&g.d<=today+7;
+    return `<div class="item" style="padding:7px 0"><div class="nm">${esc(g.lab)} ${soon?'<span class="tag pool">まもなく</span>':""}
       <small>${g.un.length}件 ・ ${esc([...new Set(g.un.map(r=>r.src))].join("・"))}</small></div>
       <div class="amt">${yen(g.un.reduce((a,r)=>a+amtIn(r,curYM),0))}</div></div>`;}).join("")
     :`<div class="empty" style="padding:8px">未払いはありません。</div>`;
@@ -917,6 +1073,40 @@ function renderHome(){
     `<div class="item" style="padding-left:0;padding-right:0"><div class="nm">${esc(r.n)}<small>${esc(r.g)} ${esc(GNAMES[r.g]||"")} ・ ${esc(r.day)}</small></div>
      <div class="amt">${yen(est(r))}</div></div>`).join("");
 }
+/* ---------- クレジット清算（半月ブロック） ---------- */
+function renderSettle(){
+  const todayS=new Date().toISOString().slice(0,10);
+  let unAmt=0, unN=0;
+  $("#stlList").innerHTML=blocksFor(curYM).map(k=>{
+    const {rows,total}=blockTotals(k), done=!!S.settings.settle[k], sd=settleDate(k);
+    const future=sd>todayS;
+    if(!done&&total>0){unAmt+=total;unN++;}
+    return `<details class="stl ${done?"done":""}" ${(!done&&total>0)?"open":""}>
+      <summary><span class="car">▶</span>
+        <span class="ttl">${esc(blockLabel(k))}
+          <small>清算日 ${+sd.slice(5,7)}/${+sd.slice(8)}${future?"（予定）":""}${rows.length?` ・ ${rows.length}枚`:""}${done?" ・ 清算済み":""}</small></span>
+        <span class="amt">${yen(total)}</span></summary>
+      ${rows.map(r=>`<div class="cd"><div class="nm">${esc(r.card)}
+        <small>${[r.tx?`やりくり ${yen(r.tx)}（${r.n}件）`:"",r.fx?`固定費 ${yen(r.fx)}`:""]
+          .filter(Boolean).join(" ・ ")}</small></div>
+        <div class="v">${yen(r.sum)}</div></div>`).join("")
+        ||`<div class="cd"><div class="nm" style="color:var(--ink-3)">この期間のカード利用はまだありません</div></div>`}
+      <label class="ft"><span class="sw2"><input type="checkbox" ${done?"checked":""} data-stl="${k}"><span></span></span>
+        <span>${done?"清算した":"清算したらチェック"}</span></label>
+    </details>`;}).join("");
+  $("#stlSub").innerHTML=unN?`未清算 ${unN}件 ・ <b>${yen(unAmt)}</b>`:"すべて清算済み";
+  const mode=OPT().fxhalf;
+  $("#stlNote").innerHTML=`1〜15日の利用は<b>当月16日</b>、16日〜末日の利用は<b>翌月1日</b>に清算。
+    JCB（16日〜翌月15日締め）も楽天（月初〜月末締め）も、この半月2ブロックでちょうど1回の請求になります。
+    ${mode==="none"?"いまは<b>やりくり明細だけ</b>で集計しています。":
+      mode==="split"?"固定費のカード払いは<b>前半・後半に半分ずつ</b>入れています。":
+      "固定費のカード払いは<b>前半（1〜15日）</b>にまとめて入れています。"}
+    設定タブの「クレジット清算の設定」で変えられます。年払い等は積立で別管理なので含みません。`;
+  $$("[data-stl]").forEach(el=>el.onchange=()=>{
+    const s=Object.assign({},S.settings.settle);
+    if(el.checked)s[el.dataset.stl]=true; else delete s[el.dataset.stl];
+    setSetting("settle",s);});
+}
 $("#poolDone").onchange=e=>{const p=Object.assign({},S.settings.pool);
   if(e.target.checked)p[curYM]=true;else delete p[curYM]; setSetting("pool",p);};
 
@@ -960,14 +1150,14 @@ $("#addBtn").onclick=addTx;
 /* ---------- MASTER ---------- */
 function renderMaster(){
   $("#incSum").textContent=yen(income());
-  $("#incList").innerHTML=INC().map(i=>
+  $("#incList").innerHTML=INC().sort(ledgerCmp).map(i=>
     `<div class="item ${i.on!==false?"":"off"}" style="padding-left:0;padding-right:0">
       <span class="sw2"><input type="checkbox" ${i.on!==false?"checked":""} data-ion="${i.id}"><span></span></span>
       <button class="tapedit" data-edit="${i.id}"><span class="nm">${esc(i.n)}</span>
         <span class="amt">${yen(i.a)}</span><span class="pen">✎</span></button></div>`).join("");
   const open=window.__open||{};
   $("#grpList").innerHTML=Object.keys(GNAMES).map(g=>{
-    const rows=FX().filter(r=>r.g===g).sort((a,b)=>(a.sort||0)-(b.sort||0));
+    const rows=FX().filter(r=>r.g===g).sort(ledgerCmp);
     const sum=rows.filter(r=>r.on).reduce((a,r)=>a+amtIn(r,curYM),0);
     return `<details class="grp" data-g="${g}" ${open[g]?"open":""}>
       <summary><span class="car">▶</span>${g} ${esc(GNAMES[g])}
@@ -986,7 +1176,7 @@ function renderMaster(){
       <div class="item" style="padding:6px 0"><div class="nm">変動費の見込み</div><div class="amt">${yen(varPlan())}</div></div>
       <div class="item" style="padding:6px 0;border-top:2px solid var(--grid)"><div class="nm"><b>合計</b></div><div class="amt"><b>${yen(planTotal(curYM)+budget())}</b></div></div></div>`;
   $$("#grpList details").forEach(d=>d.addEventListener("toggle",()=>{window.__open=window.__open||{};window.__open[d.dataset.g]=d.open;}));
-  $("#varList").innerHTML=VP().map(r=>
+  $("#varList").innerHTML=VP().sort(ledgerCmp).map(r=>
     `<div class="item" style="padding-left:0;padding-right:0">
       <button class="tapedit" data-edit="${r.id}"><span class="nm">${esc(r.n)}</span>
         <span class="amt">${yen(r.a)}</span><span class="pen">✎</span></button></div>`).join("")
@@ -1010,8 +1200,13 @@ $("#expJson").onclick=()=>dl(`家計簿_${new Date().toISOString().slice(0,10)}.
 $("#expCsv").onclick=()=>dl(`やりくり_${curYM}.csv`,txCsv(mTx(curYM)),"text/csv");
 $("#expCsvAll").onclick=()=>dl("やりくり_全期間.csv",txCsv(S.expenses),"text/csv");
 $("#expPay").onclick=()=>dl(`支払い_${curYM}.csv`,csv([["引落日","グループ","項目","金額","引落元","支払済み"],
-  ...payRows().slice().sort((a,b)=>dayNum(a.day)-dayNum(b.day))
-    .map(r=>[r.day,r.g+" "+(GNAMES[r.g]||""),r.n,amtIn(r,curYM),r.src,isPaid(r,curYM)?"○":""])]),"text/csv");
+  ...payRows().concat(g8Rows()).slice().sort((a,b)=>dayNum(a.day)-dayNum(b.day)||jcmp(a.n,b.n))
+    .map(r=>[r.g==="⑧"?"（日付なし）":r.day,r.g+" "+(GNAMES[r.g]||""),r.n,amtIn(r,curYM),r.src,isPaid(r,curYM)?"○":""])]),"text/csv");
+$("#expStl")&&($("#expStl").onclick=()=>dl(`クレジット清算_${curYM}.csv`,
+  csv([["半月ブロック","清算日","カード","やりくり","固定費","合計","清算済み"],
+    ...blocksFor(curYM).flatMap(k=>blockTotals(k).rows.map(r=>
+      [blockLabel(k),settleDate(k),r.card,Math.round(r.tx),Math.round(r.fx),Math.round(r.sum),
+       S.settings.settle[k]?"○":""]))]),"text/csv"));
 function renderData(){
   const chip=(v,attr)=>`<span class="tag" style="padding:5px 6px 5px 10px;font-size:12.5px">${esc(v)}<button class="del" style="font-size:14px;padding:0 3px" ${attr}="${esc(v)}">×</button></span>`;
   $("#catEdit").innerHTML=S.settings.cats.map(c=>chip(c,"data-cdel")).join("");
@@ -1020,6 +1215,18 @@ function renderData(){
     setSetting("cats",S.settings.cats.filter(c=>c!==b.dataset.cdel));fillSelects();});
   $$("[data-pdel]").forEach(b=>b.onclick=()=>{if(S.settings.pays.length<=1)return;
     setSetting("pays",S.settings.pays.filter(p=>p!==b.dataset.pdel));fillSelects();});
+  const cur=cardList();
+  $("#cardEdit").innerHTML=payUniverse().map(p=>{const on=cur.includes(p);
+    return `<button class="chip" data-card="${esc(p)}" style="${on
+      ?"border-color:var(--s1);color:var(--s1);font-weight:640"
+      :"opacity:.5"}">${on?"✓ ":""}${esc(p)}</button>`;}).join("")
+    ||`<span class="note" style="margin:0">支払方法がありません。</span>`;
+  $$("[data-card]").forEach(b=>b.onclick=()=>{const c=cardList(), p=b.dataset.card;
+    setOpt("cards",c.includes(p)?c.filter(x=>x!==p):c.concat([p]));});
+  $("#fxHalf").value=OPT().fxhalf;
+  $("#lSort").value=OPT().lsort;
+  $("#fxHalf").onchange=e=>setOpt("fxhalf",e.target.value);
+  $("#lSort").onchange=e=>setOpt("lsort",e.target.value);
   const c=cfg();
   $("#acctSub").textContent=session&&session.user?session.user.email:(mode==="local"?"未ログイン":"");
   $("#syncInfo").innerHTML=c
@@ -1036,16 +1243,19 @@ $("#resetTx").onclick=()=>{
   S.expenses=S.expenses.filter(t=>ymOf(t.date)!==curYM);
   delete S.monthly[curYM];
   const p=Object.assign({},S.settings.pool); delete p[curYM]; S.settings.pool=p;
+  const st=Object.assign({},S.settings.settle);
+  delete st[curYM+"-H1"]; delete st[curYM+"-H2"]; S.settings.settle=st;
   cache();
   OUT.push({id:uuid(),t:"exp.delM",from,to});
   OUT.push({id:uuid(),t:"monthly.delM",ym:curYM});
   OUT.push({id:uuid(),t:"set.up",key:"pool",value:p});
+  OUT.push({id:uuid(),t:"set.up",key:"settle",value:st});
   outSave();refreshSync();flush();render();};
 $("#cfgReset2").onclick=()=>{if(confirm("接続先の設定を消してやり直します。"))
   {localStorage.removeItem(LS.cfg);location.reload();}};
 
 /* ---------- render ---------- */
-function render(){renderHome();renderPay();renderUse();renderMaster();renderData();refreshSync();}
+function render(){renderHome();renderSettle();renderPay();renderUse();renderMaster();renderData();refreshSync();}
 /* デバッグ用フック */
 window.__kkb={S:()=>S,OUT:()=>OUT,mode:()=>mode,
   attach:(client,sess)=>{sb=client;session=sess;mode="online";},
