@@ -416,10 +416,13 @@
       <h2>毎月払いでない分の積立 <span class="sub">現金でプール</span></h2>
       <div class="big" id="poolVal" style="font-size:30px;font-weight:670;line-height:1.15">–</div>
       <div id="poolSub" style="font-size:12.5px;color:var(--ink-3)"></div>
+      <div class="pg"><i id="poolPg"></i></div>
+      <div class="legend"><span id="poolMsg"></span></div>
       <label style="display:flex;align-items:center;gap:10px;margin:12px 0 0;font-size:13.5px;font-weight:550">
         <span class="sw2"><input type="checkbox" id="poolDone"><span></span></span>
-        <span id="poolDoneLab">今月分をプールした</span></label>
-      <div id="poolList" style="margin-top:8px"></div>
+        <span id="poolDoneLab">今月分をまとめてプールした</span></label>
+      <div class="note" style="margin-top:7px">ここのチェックは<b>「支払い」タブと同じもの</b>です。どちらで付けても両方に入ります。</div>
+      <div id="poolList" style="margin-top:4px"></div>
     </div>
   </div>
 </section>
@@ -538,6 +541,7 @@
    家計簿 2026 — Supabase 同期版
    ローカルキャッシュ + 送信キュー（オフライン対応）+ リアルタイム購読
    ============================================================ */
+const APP_VER="2026-09-01c";   // 設定タブ下部に表示。端末が最新かどうかの確認用
 const LS={cfg:"kkb.cfg",cache:"kkb.cache",outbox:"kkb.outbox",ui:"kkb.ui"};
 const lsGet=(k,d)=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):d;}catch(e){return d;}};
 const lsSet=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}};
@@ -1064,14 +1068,28 @@ function renderHome(){
     `<div class="col"><div class="tl">${vs[i]?Math.round(vs[i]/1000)+"k":""}</div>
      <div class="tb" style="height:${vs[i]/vmax*80}%;${k===curYM?"":"opacity:.4"}"></div>
      <div class="tl">${l}月</div></div>`).join("");
-  const pl=onRows().filter(r=>r.nm), pd=!!S.settings.pool[curYM];
-  $("#poolVal").textContent=yen(poolAmt());
+  /* 積立＝毎月払いでない項目。チェックは支払いタブと同じ monthly.paid を共有する */
+  const pl=onRows().filter(r=>r.nm).slice().sort((a,b)=>est(b)-est(a));
+  const pDone=pl.filter(r=>isPaid(r,curYM)), pTot=poolAmt();
+  const pDoneAmt=pDone.reduce((a,r)=>a+est(r),0), pAll=pl.length>0&&pDone.length===pl.length;
+  $("#poolVal").textContent=yen(pTot);
   $("#poolSub").textContent=`毎月払いでない ${pl.length}件ぶん。支払い予定の内数です（別途かかるお金ではありません）。`;
-  $("#poolDone").checked=pd;
-  $("#poolDoneLab").textContent=pd?`${+m}月分はプール済み`:`${+m}月分をプールした`;
-  $("#poolList").innerHTML=pl.slice().sort((a,b)=>est(b)-est(a)).map(r=>
-    `<div class="item" style="padding-left:0;padding-right:0"><div class="nm">${esc(r.n)}<small>${esc(r.g)} ${esc(GNAMES[r.g]||"")} ・ ${esc(r.day)}</small></div>
-     <div class="amt">${yen(est(r))}</div></div>`).join("");
+  $("#poolPg").style.width=(pTot?pDoneAmt/pTot*100:0)+"%";
+  $("#poolPg").style.background=pAll?"var(--s3)":"var(--s1)";
+  $("#poolMsg").innerHTML=pAll
+    ? `<b class="pos">${+m}月分はプール済み</b>　<span style="color:var(--ink-3)">${yen(pDoneAmt)}</span>`
+    : `のこり <b>${yen(pTot-pDoneAmt)}</b>　<span style="color:var(--ink-3)">${pDone.length}/${pl.length}件 ・ ${yen(pDoneAmt)} / ${yen(pTot)}</span>`;
+  $("#poolDone").checked=pAll;
+  $("#poolDoneLab").textContent=pAll?`${+m}月分は全部プール済み`:`${+m}月分をまとめてプールした`;
+  $("#poolList").innerHTML=pl.map(r=>{const p=isPaid(r,curYM);
+    return `<div class="prow ${p?"paid":""}" style="padding-left:0;padding-right:0">
+      <label class="chk"><input type="checkbox" ${p?"checked":""} data-pool="${r.id}"><span></span></label>
+      <div class="t">${esc(r.n)}<small>${esc(r.g)} ${esc(GNAMES[r.g]||"")} ・ ${esc(r.src)} ・ ${esc(r.day)}</small></div>
+      <div class="amt">${yen(est(r))}</div></div>`;}).join("")
+    ||`<div class="empty">「毎月払いでない」項目がありません。</div>`;
+  $$("[data-pool]").forEach(el=>el.onchange=()=>{
+    const r=S.ledger.find(x=>x.id===el.dataset.pool);
+    setMonthly(r,curYM,{paid:el.checked});});
 }
 /* ---------- クレジット清算（半月ブロック） ---------- */
 function renderSettle(){
@@ -1107,8 +1125,17 @@ function renderSettle(){
     if(el.checked)s[el.dataset.stl]=true; else delete s[el.dataset.stl];
     setSetting("settle",s);});
 }
-$("#poolDone").onchange=e=>{const p=Object.assign({},S.settings.pool);
-  if(e.target.checked)p[curYM]=true;else delete p[curYM]; setSetting("pool",p);};
+/* まとめてプール：12件すべての支払いチェックを一括で入れる／外す */
+$("#poolDone").onchange=e=>{
+  const on=e.target.checked, pl=onRows().filter(r=>r.nm);
+  pl.forEach(r=>{const cur=Object.assign({paid:false,amount:null},mrec(r,curYM)||{},{paid:on});
+    (S.monthly[curYM]=S.monthly[curYM]||{})[r.id]=cur;
+    OUT.push({id:uuid(),t:"monthly.up",row:{ym:curYM,ledger_id:r.id,paid:cur.paid,amount:cur.amount}});});
+  const p=Object.assign({},S.settings.pool);
+  if(on)p[curYM]=true; else delete p[curYM];
+  S.settings.pool=p;
+  cache(); OUT.push({id:uuid(),t:"set.up",key:"pool",value:p});
+  outSave(); refreshSync(); flush(); render();};
 
 /* ---------- YARIKURI ---------- */
 function fillSelects(){
@@ -1229,9 +1256,10 @@ function renderData(){
   $("#lSort").onchange=e=>setOpt("lsort",e.target.value);
   const c=cfg();
   $("#acctSub").textContent=session&&session.user?session.user.email:(mode==="local"?"未ログイン":"");
-  $("#syncInfo").innerHTML=c
+  $("#syncInfo").innerHTML=(c
     ? `接続先 <code>${esc(c.url)}</code><br>状態：<b>${esc(syncState.txt)}</b>${pending()?`　未送信 ${pending()}件`:""}`
-    : `接続先が未設定です。同期するには右上の同期ボタンから設定してください。`;
+    : `接続先が未設定です。同期するには右上の同期ボタンから設定してください。`)
+    + `<br>バージョン <code>${APP_VER}</code>（この表示が端末ごとに違うなら、古い方はアプリを閉じて開き直す）`;
 }
 $("#addCat").onclick=()=>{const v=$("#newCat").value.trim();if(!v||S.settings.cats.includes(v))return;
   setSetting("cats",S.settings.cats.concat([v]));$("#newCat").value="";fillSelects();};
