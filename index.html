@@ -535,13 +535,32 @@
   </div>
 </div>
 
+<div class="sheet" id="txSheet" hidden>
+  <div class="bg" id="txSheetBg"></div>
+  <div class="body">
+    <h3><span>やりくりの記録を編集</span><button class="x" id="txClose" aria-label="閉じる">×</button></h3>
+    <div class="field"><label for="txAmt">金額（円）</label><input type="number" inputmode="decimal" id="txAmt"></div>
+    <div class="field"><label for="txCat">カテゴリ</label><select id="txCat"></select></div>
+    <div class="two">
+      <div class="field"><label for="txDate">日付</label><input type="date" id="txDate"></div>
+      <div class="field"><label for="txPay">支払方法</label><select id="txPay"></select></div>
+    </div>
+    <div class="field"><label for="txMemo">メモ・店名（任意）</label><input type="text" id="txMemo" placeholder="例：業務スーパー"></div>
+    <div class="row" style="margin-top:16px">
+      <button class="btn danger" id="txDel">削除</button>
+      <span style="flex:1"></span>
+      <button class="btn primary" id="txSave" style="width:auto;flex:1">保存</button>
+    </div>
+  </div>
+</div>
+
 <script>
 "use strict";
 /* ============================================================
    家計簿 2026 — Supabase 同期版
    ローカルキャッシュ + 送信キュー（オフライン対応）+ リアルタイム購読
    ============================================================ */
-const APP_VER="2026-09-01c";   // 設定タブ下部に表示。端末が最新かどうかの確認用
+const APP_VER="2026-09-10a";   // 設定タブ下部に表示。端末が最新かどうかの確認用
 const LS={cfg:"kkb.cfg",cache:"kkb.cache",outbox:"kkb.outbox",ui:"kkb.ui"};
 const lsGet=(k,d)=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):d;}catch(e){return d;}};
 const lsSet=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}};
@@ -850,6 +869,10 @@ function setMonthly(r,m,patch){
 function addExpense(e){S.expenses.push(e);cache();
   enqueue({t:"exp.ins",row:{id:e.id,spent_on:e.date,category:e.cat,amount:e.amount,method:e.pay,memo:e.memo}});render();}
 function delExpense(id){S.expenses=S.expenses.filter(x=>x.id!==id);cache();enqueue({t:"exp.del",id2:id});render();}
+/* 既存の明細を上書き。exp.ins は upsert なので同じキューで更新できる */
+function updExpense(e){const t=S.expenses.find(x=>x.id===e.id); if(!t)return;
+  Object.assign(t,e); cache();
+  enqueue({t:"exp.ins",row:{id:t.id,spent_on:t.date,category:t.cat,amount:t.amount,method:t.pay,memo:t.memo}});render();}
 function setSetting(k,v){S.settings[k]=v;cache();enqueue({t:"set.up",key:k,value:v});render();}
 
 /* ---------- theme / nav ---------- */
@@ -905,6 +928,32 @@ $("#shSave").onclick=()=>{ if(!EDIT)return;
 $("#shDel").onclick=()=>{ if(!EDIT)return; if(!confirm("この項目を削除します。よろしいですか？"))return;
   const id=EDIT.id; EDIT=null; $("#sheet").hidden=true; document.body.classList.remove("locked"); delLedger(id); };
 addEventListener("keydown",e=>{if(e.key==="Escape"&&!$("#sheet").hidden)closeSheet(true);});
+
+/* ---------- edit sheet（やりくり明細） ---------- */
+let TXEDIT=null;
+function openTxSheet(id){
+  const t=S.expenses.find(x=>x.id===id); if(!t)return;
+  TXEDIT=id;
+  /* 設定から消えたカテゴリ・支払方法でも、その行の値は必ず選べるようにする */
+  const opts=(list,cur)=>[...new Set(list.concat(cur?[cur]:[]))]
+    .map(v=>`<option${v===cur?" selected":""}>${esc(v)}</option>`).join("");
+  $("#txCat").innerHTML=opts(S.settings.cats,t.cat);
+  $("#txPay").innerHTML=opts(S.settings.pays,t.pay);
+  $("#txAmt").value=t.amount??0; $("#txDate").value=t.date||""; $("#txMemo").value=t.memo||"";
+  $("#txSheet").hidden=false; document.body.classList.add("locked"); setTimeout(()=>$("#txAmt").focus(),60);
+}
+function closeTxSheet(){$("#txSheet").hidden=true; document.body.classList.remove("locked"); TXEDIT=null;}
+$("#txSheetBg").onclick=closeTxSheet; $("#txClose").onclick=closeTxSheet;
+$("#txSave").onclick=()=>{ if(!TXEDIT)return;
+  const amt=+$("#txAmt").value; if(!amt){$("#txAmt").focus();return;}
+  const date=$("#txDate").value||defDate();
+  const e={id:TXEDIT,date,cat:$("#txCat").value,amount:amt,pay:$("#txPay").value,memo:$("#txMemo").value.trim()};
+  closeTxSheet();
+  if(ymOf(date)!==curYM)curYM=ymOf(date);   /* 月をまたいで直したら、その月に移動する */
+  updExpense(e); };
+$("#txDel").onclick=()=>{ if(!TXEDIT)return; if(!confirm("この記録を削除します。よろしいですか？"))return;
+  const id=TXEDIT; closeTxSheet(); delExpense(id); };
+addEventListener("keydown",e=>{if(e.key==="Escape"&&!$("#txSheet").hidden)closeTxSheet();});
 function nextSort(){return Math.max(0,...S.ledger.map(r=>r.sort||0))+1;}
 function addLedger(kind,g){
   const r={id:uuid(),kind,g:g||null,n:"",a:0,src:kind==="fixed"?"不明":null,day:kind==="fixed"?"不明":null,
@@ -1155,10 +1204,12 @@ function renderUse(){
   $("#txCount").textContent=list.length?`${list.length}件・${yen(used(curYM))}`:"";
   $("#txList").innerHTML=list.length?list.map(t=>
     `<div class="item" style="padding-left:0;padding-right:0">
-      <div class="nm"><b>${esc(t.cat)}</b>${t.memo?" "+esc(t.memo):""}<small>${+String(t.date).slice(8)}日 ・ ${esc(t.pay)}</small></div>
-      <div class="amt">${yen(t.amount)}</div><button class="del" data-del="${t.id}" aria-label="削除">×</button></div>`).join("")
+      <button class="tapedit" data-txedit="${t.id}"><span class="nm"><b>${esc(t.cat)}</b>${t.memo?" "+esc(t.memo):""}<small>${+String(t.date).slice(8)}日 ・ ${esc(t.pay)}</small></span>
+        <span class="amt">${yen(t.amount)}</span><span class="pen">✎</span></button>
+      <button class="del" data-del="${t.id}" aria-label="削除">×</button></div>`).join("")
     :`<div class="empty">まだ記録がありません。</div>`;
   $$("[data-del]").forEach(b=>b.onclick=()=>delExpense(b.dataset.del));
+  $$("[data-txedit]").forEach(b=>b.onclick=()=>openTxSheet(b.dataset.txedit));
   const SEP="␟", freq={};
   S.expenses.forEach(t=>{const k=[t.memo||t.cat,t.cat,t.pay,t.amount].join(SEP);freq[k]=(freq[k]||0)+1;});
   $("#quickChips").innerHTML=Object.entries(freq).sort((a,b)=>b[1]-a[1]).slice(0,8)
